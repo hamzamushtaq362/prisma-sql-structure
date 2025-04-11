@@ -1,13 +1,25 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 const Response = require("./Response");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 class Users extends Response {
   // Create user
   createUser = async (req, res) => {
     try {
+      const { name, email, password, ...rest } = req.body;
+      //
+      const hashedPassword = await bcrypt.hash(password, 10);
+      
+      //
       const user = await prisma.user.create({
-        data: req.body,
+        data: {
+          name,
+          email,
+          password: hashedPassword,
+          ...rest,
+        },
       });
       return this.sendResponse(req, res, {
         status: 201,
@@ -113,6 +125,73 @@ class Users extends Response {
         status: 400,
         message: "Deletion failed",
         error: error.message,
+      });
+    }
+  };
+
+  // Sign in
+  signIn = async (req, res) => {
+    try {
+      const { email, password } = req.body;
+
+      // Check if email and password are provided
+      if (!email || !password) {
+        return this.sendResponse(req, res, {
+          status: 400,
+          message: "Email and password are required",
+        });
+      }
+
+      // Find the user by email
+      const user = await prisma.user.findUnique({ where: { email } });
+
+      if (!user) {
+        return this.sendResponse(req, res, {
+          status: 401,
+          message: "Invalid email or password",
+        });
+      }
+
+      // Compare password
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return this.sendResponse(req, res, {
+          status: 401,
+          message: "Invalid email or password",
+        });
+      }
+
+      // Create token
+      const token = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          name: user.name,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: "7d" }
+      );
+
+      // Send response
+      return this.sendResponse(req, res, {
+        status: 200,
+        message: "Login successful",
+        data: {
+          token,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Login Error:", error);
+      return this.sendResponse(req, res, {
+        status: 500,
+        message: "Internal server error",
       });
     }
   };
